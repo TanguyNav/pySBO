@@ -132,12 +132,13 @@ class SOFA_Compliance(Box_Constrained):
             dfree_0 = root.Controller.get_dfree()
 
             # Apply action
-            interpolated_action = self.__config.interpolate_actuation(candidate)
+            interpolated_action = self.__config.interpolate_variables(candidate, var_type = "actuation")
             for step in range(self.__config.get_n_dt()):
                 interpolated_action_step = [min((step + 1) * v/(self.__config.get_n_dt() - 10), v) for v in interpolated_action] # Apply gradually action
                 root.Controller.apply_actions(interpolated_action_step)
                 Sofa.Simulation.animate(root, root.dt.value)
                 time.sleep(root.dt.value)
+                
 
             actuation_state = root.Controller.get_actuators_state()
             effectors_state = root.Controller.get_effectors_state() # By default it is null
