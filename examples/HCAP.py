@@ -1,15 +1,19 @@
-"""Script running the parallel Hybrid Concurrent Acquition Process for single-objective optimization.
+"""``HCAP.py`` Script running the parallel Hybrid Concurrent Acquition Process for single-objective optimization.
 
 The Hybrid Concurrent Acquition Process is described in:
-`G. Briffoteaux. Parallel surrogate-based algorithms for solving expensive optimization problems. Thesis. 2022. <https://hal.science/tel-03853862>`_
+`G. Briffoteaux, N. Melab, M. Mezmaz et D. Tuyttens. Hybrid Acquisition Processes in Surrogate-based Optimization. Application to Covid-19 Contact Reduction. International Conference on Bioinspired Optimisation Methods and Their Applications, BIOMA, 2022, Maribor, Slovenia, Lecture Notes in Computer Science, vol 13627. Springer, pages 127-141 <https://doi.org/10.1007/978-3-031-21094-5_10>`_
 
-To run sequentially: ``python3.9 ./HCAP.py``
+Execution on Linux:
+  * To run sequentially: ``python ./HCAP.py``
+  * To run in parallel (in 4 computational units): ``mpiexec -n 4 python HCAP.py``
+  * To run in parallel (in 4 computational units) specifying the units in `./hosts.txt`: ``mpiexec --machinefile ./host.txt -n 4 python HCAP.py``
 
-To run in parallel (in 4 computational units): ``mpiexec -n 4 python3.9 HCAP.py``
-
-To run in parallel (in 4 computational units) specifying the units in `./hosts.txt`: ``mpiexec --machinefile ./host.txt -n 4 python3.9 HCAP.py``
+Execution on Windows:
+  * To run sequentially: ``python ./HCAP.py``
+  * To run in parallel (in 4 computational units): ``mpiexec /np 4 python HCAP.py``
 """
 
+import shutil
 import sys
 sys.path.append('../src')
 import os
@@ -45,31 +49,31 @@ def main():
     rank = comm.Get_rank()
     nprocs = comm.Get_size()
 
+    # Problem
+    p = Schwefel(16)
 
     #--------------------------------#
     #-------------MASTER-------------#
     #--------------------------------#
     if rank==0:
         
-        # Problem
-        p = Schwefel(16)
-
         # Files
-        DIR_STORAGE = "./outputs/"
-        os.system("rm -rf "+DIR_STORAGE+"/*")
-        F_SIM_ARCHIVE = DIR_STORAGE+"sim_archive.csv"
-        F_TRAIN_LOG_BNN = DIR_STORAGE+"training_log_BNN.csv"
-        F_TRAIN_LOG_GP = DIR_STORAGE+"training_log_GP.csv"
-        F_TRAINED_MODEL_BNN = DIR_STORAGE+"trained_model_BNN"
-        F_TRAINED_MODEL_GP = DIR_STORAGE+"trained_model_GP"
-        F_TMP_DB=DIR_STORAGE+"tmp_db.csv"
-        F_BEST_PROFILE = DIR_STORAGE+"best_profile.csv"
-        F_INIT_POP = DIR_STORAGE+"init_pop.csv"
+        DIR_STORAGE = "outputs"
+        shutil.rmtree(DIR_STORAGE, ignore_errors=True)
+        os.makedirs(DIR_STORAGE, exist_ok=True)
+        F_SIM_ARCHIVE = DIR_STORAGE+"/sim_archive.csv"
+        F_TRAIN_LOG_BNN = DIR_STORAGE+"/training_log_BNN.csv"
+        F_TRAIN_LOG_GP = DIR_STORAGE+"/training_log_GP.csv"
+        F_TRAINED_MODEL_BNN = DIR_STORAGE+"/trained_model_BNN"
+        F_TRAINED_MODEL_GP = DIR_STORAGE+"/trained_model_GP"
+        F_TMP_DB=DIR_STORAGE+"/tmp_db.csv"
+        F_BEST_PROFILE = DIR_STORAGE+"/best_profile.csv"
+        F_INIT_POP = DIR_STORAGE+"/init_pop.csv"
     
         # Search arguments
         TIME_BUDGET = 0
-        N_GEN = 1
-        SIM_TIME = 15
+        N_GEN = 2
+        SIM_TIME = 0
         if TIME_BUDGET > 0:
             assert TIME_BUDGET > SIM_TIME
             N_GEN = 1000000000000
@@ -104,6 +108,7 @@ def main():
         pop.fitness_modes = True*np.ones(pop.obj_vals.shape, dtype=bool)
 
         # Logging
+        pop.save_to_csv_file(F_INIT_POP)
         pop.save_sim_archive(F_SIM_ARCHIVE)
         pop.update_best_sim(F_BEST_PROFILE)
         pop.save_sim_archive(F_TMP_DB)
@@ -215,7 +220,7 @@ def main():
             # Logging
             batch_to_simulate.save_sim_archive(F_SIM_ARCHIVE) 
             batch_to_simulate.update_best_sim(F_BEST_PROFILE)
-            os.system("cat "+F_SIM_ARCHIVE+" > "+F_TMP_DB)
+            shutil.copy(F_SIM_ARCHIVE, F_TMP_DB)
 
             # Surrogate update
             surr_BNN.perform_training()

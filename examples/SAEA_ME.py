@@ -1,17 +1,21 @@
-"""Script running the synchronous parallel Surrogate-Assisted Evolutionary Algorithm for Medium Scale Expensive multi-objective problems (SAEA_ME).
+"""``SAEA_ME.py`` Script running the synchronous parallel Surrogate-Assisted Evolutionary Algorithm for Medium Scale Expensive multi-objective problems.
 
 SAEA_ME is described in:
 `X. Ruan, K. Li, B. Derbel, and A. Liefooghe. Surrogate assisted evolutionary algorithm for medium scale multi-objective optimisation problems. In Proceedings of the 2020 Genetic and Evolutionary Computation Conference, GECCO 2020, page560–568, New York, NY, USA, 2020. Association for Computing Machinery <https://hal.archives-ouvertes.fr/hal-02932303v1>`_
 
 The dimensionality reduction technique proposed in the paper is not reproduced.
 
-To run sequentially: ``python3.9 ./SAEA_ME.py``
+Execution on Linux:
+  * To run sequentially: ``python ./SAEA_ME.py``
+  * To run in parallel (in 4 computational units): ``mpiexec -n 4 python SAEA_ME.py``
+  * To run in parallel (in 4 computational units) specifying the units in `./hosts.txt`: ``mpiexec --machinefile ./host.txt -n 4 python SAEA_ME.py``
 
-To run in parallel (in 4 computational units): ``mpiexec -n 4 python3.9 SAEA_ME.py``
-
-To run in parallel (in 4 computational units) specifying the units in `./hosts.txt`: ``mpiexec --machinefile ./host.txt -n 4 python SAEA_ME.py``
+Execution on Windows:
+  * To run sequentially: ``python ./SAEA_ME.py``
+  * To run in parallel (in 4 computational units): ``mpiexec /np 4 python SAEA_ME.py``
 """
 
+import shutil
 import sys
 sys.path.append('../src')
 import os
@@ -70,14 +74,15 @@ def main():
         Global_Var.ref_point=np.array([100., 100., 100.])
 
         # Files
-        DIR_STORAGE="./outputs"
+        DIR_STORAGE="outputs"
         F_SIM_ARCHIVE=DIR_STORAGE+"/sim_archive.csv"
         F_BEST_PROFILE=DIR_STORAGE+"/best_profile.csv"
         F_INIT_DB=DIR_STORAGE+"/init_db.csv"
         F_HYPERVOLUME=DIR_STORAGE+"/hypervolume.csv"
         F_TRAIN_LOG=DIR_STORAGE+"/training_log.csv"
         F_TRAINED_MODEL=DIR_STORAGE+"/trained_model"
-        os.system("rm -rf "+DIR_STORAGE+"/*")
+        shutil.rmtree(DIR_STORAGE, ignore_errors=True)
+        os.makedirs(DIR_STORAGE, exist_ok=True)
 
         # Database initialization / Parallel DoE
         sampler = DoE(p)
@@ -110,8 +115,8 @@ def main():
             t_start = time.time()
 
         # Creating surrogate
-        surr = BNN_MCD(F_SIM_ARCHIVE, p, float('inf'), F_TRAIN_LOG, F_TRAINED_MODEL, 5)
-        # surr = GP_MO(F_SIM_ARCHIVE, p, 72, F_TRAIN_LOG, F_TRAINED_MODEL, 'rbf')
+        # surr = BNN_MCD(F_SIM_ARCHIVE, p, float('inf'), F_TRAIN_LOG, F_TRAINED_MODEL, 5)
+        surr = GP_MO(F_SIM_ARCHIVE, p, 72, F_TRAIN_LOG, F_TRAINED_MODEL, 'rbf')
         surr.perform_training()
 
         # Evolution Control / Infill Criterion

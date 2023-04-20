@@ -1,15 +1,21 @@
-"""Script running the parallel Hybrid Successive Acquition Process for single-objective optimization.
+"""``HSAP.py`` Script running the parallel Hybrid Successive Acquition Process for single-objective optimization.
 
 The Hybrid Successive Acquition Process is described in:
-`G. Briffoteaux. Parallel surrogate-based algorithms for solving expensive optimization problems. Thesis. 2022. <https://hal.science/tel-03853862>`_
+`G. Briffoteaux, N. Melab, M. Mezmaz et D. Tuyttens. Hybrid Acquisition Processes in Surrogate-based Optimization. Application to Covid-19 Contact Reduction. International Conference on Bioinspired Optimisation Methods and Their Applications, BIOMA, 2022, Maribor, Slovenia, Lecture Notes in Computer Science, vol 13627. Springer, pages 127-141 <https://doi.org/10.1007/978-3-031-21094-5_10>`_
 
-To run sequentially: ``python3.9 ./HSAP.py``
+You must set the SIM_TIME variable to a non-zero positive value. This represents the evaluation time of the objective function (which is fictitious in case of artificial benchmark functions).
 
-To run in parallel (in 4 computational units): ``mpiexec -n 4 python3.9 HSAP.py``
+Execution on Linux:
+  * To run sequentially: ``python ./HSAP.py``
+  * To run in parallel (in 4 computational units): ``mpiexec -n 4 python HSAP.py``
+  * To run in parallel (in 4 computational units) specifying the units in `./hosts.txt`: ``mpiexec --machinefile ./host.txt -n 4 python HSAP.py``
 
-To run in parallel (in 4 computational units) specifying the units in `./hosts.txt`: ``mpiexec --machinefile ./host.txt -n 4 python3.9 HSAP.py``
+Execution on Windows:
+  * To run sequentially: ``python ./HSAP.py``
+  * To run in parallel (in 4 computational units): ``mpiexec /np 4 python HSAP.py``
 """
 
+import shutil
 import sys
 sys.path.append('../src')
 import os
@@ -63,16 +69,17 @@ def main():
         INIT_DB_SIZE = 36
 
         # Files
-        DIR_STORAGE = "./outputs/"
-        os.system("rm -rf "+DIR_STORAGE+"/*")
-        F_SIM_ARCHIVE = DIR_STORAGE+"sim_archive.csv"
-        F_TRAIN_LOG_BNN = DIR_STORAGE+"training_log_BNN.csv"
-        F_TRAIN_LOG_GP = DIR_STORAGE+"training_log_GP.csv"
-        F_TRAINED_MODEL_BNN = DIR_STORAGE+"trained_model_BNN"
-        F_TRAINED_MODEL_GP = DIR_STORAGE+"trained_model_GP"
-        F_TMP_DB=DIR_STORAGE+"tmp_db.csv"
-        F_BEST_PROFILE = DIR_STORAGE+"best_profile.csv"
-        F_INIT_POP = DIR_STORAGE+"init_pop.csv"
+        DIR_STORAGE = "outputs"
+        shutil.rmtree(DIR_STORAGE, ignore_errors=True)
+        os.makedirs(DIR_STORAGE, exist_ok=True)
+        F_SIM_ARCHIVE = DIR_STORAGE+"/sim_archive.csv"
+        F_TRAIN_LOG_BNN = DIR_STORAGE+"/training_log_BNN.csv"
+        F_TRAIN_LOG_GP = DIR_STORAGE+"/training_log_GP.csv"
+        F_TRAINED_MODEL_BNN = DIR_STORAGE+"/trained_model_BNN"
+        F_TRAINED_MODEL_GP = DIR_STORAGE+"/trained_model_GP"
+        F_TMP_DB=DIR_STORAGE+"/tmp_db.csv"
+        F_BEST_PROFILE = DIR_STORAGE+"/best_profile.csv"
+        F_INIT_DB = DIR_STORAGE+"/init_db.csv"
 
         # Parameter for q-EGO
         q=18
@@ -97,6 +104,7 @@ def main():
         db.fitness_modes = True*np.ones(db.obj_vals.shape, dtype=bool)
             
         # Logging
+        db.save_to_csv_file(F_INIT_DB)
         db.save_sim_archive(F_SIM_ARCHIVE)
         db.update_best_sim(F_BEST_PROFILE)
         db.save_sim_archive(F_TMP_DB)
@@ -193,7 +201,7 @@ def main():
             # Logging
             q_cands.save_sim_archive(F_SIM_ARCHIVE) 
             q_cands.update_best_sim(F_BEST_PROFILE)
-            os.system("cat "+F_SIM_ARCHIVE+" > "+F_TMP_DB)
+            shutil.copy(F_SIM_ARCHIVE, F_TMP_DB)
             del q_cands
         
             # Check for AP switch
