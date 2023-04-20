@@ -1,12 +1,9 @@
 import time
 import numpy as np
-import sys
-
-import pathlib
 import importlib
+import copy
 
 # SOFA Libraries
-sys.path.insert(0, str(pathlib.Path(__file__).parent.absolute())+"/../../../predictingcompliance")
 import Sofa
 import SofaRuntime
 SofaRuntime.importPlugin("SofaPython3")
@@ -30,6 +27,7 @@ class SOFA_Compliance(Box_Constrained):
 
         self.__model_name = model_name
         self.__config = self.init_config() # The config object describing a Soft Robot optimization problem in the predicting_compliance project
+        self.__scene_lib = importlib.import_module("SofaModels." + self.__config.model_name + "." + self.__config.model_name)
         self.init_Box_Constrained()
 
         # self.__param_set = read_list_of_param_sets_from_csv(self.__country)[0]
@@ -81,7 +79,7 @@ class SOFA_Compliance(Box_Constrained):
     def init_config(self):
         """ This method load a soft robot config from the "predicting_compliance" project.
         TODO: add requirements on folder localizations. """
-        config_lib = importlib.import_module("Models."+ self.__model_name +".Config")
+        config_lib = importlib.import_module("SofaModels."+ self.__model_name +".Config")
         Config = config_lib.Config()
         # TODO: add special treatment of config file
         return Config
@@ -97,63 +95,167 @@ class SOFA_Compliance(Box_Constrained):
     
     #-------------perform_real_evaluation-------------#
     def perform_real_evaluation(self, candidates):
+        """
+        Perform a set of simulation evaluation.
+        -------
+        Inputs:
+        -------
+            candidates: list o lists of floats
+                List of list of float values describing sampling variables. 
+        --------
+        Outputs:
+        --------
+            time_costs: list of floats
+                Time consumption for evaluating each candidate
+            mechanical_matrices = list of dicts of numpy arrays
+                List of mechanical matrices obtained from simulated candidates
+        """
         assert self.is_feasible(candidates)
+        
         if candidates.ndim==1:
             candidates = np.array([candidates])
-
-        costs = np.zeros((candidates.shape[0],))
         
+        time_costs = np.zeros((candidates.shape[0],))
+        mechanical_matrices = []
+
         for i,cand in enumerate(candidates):
-            print(cand)
             t_start = time.time()
-            loss = self.objective_function(cand)
-            t_end = time.time()
-            costs[i] = loss
-            print(t_end-t_start)
-        
-        return costs
+            try: 
+                w_0, dfree_0, disp_state, w, dfree = self.get_simulated_mechanical_matrices(cand)
+                t_end = time.time()
+                time_costs[i] = t_end-t_start
+                mechanical_matrices.append(
+                    {"W_0": w_0, "dfree_0": dfree_0, 
+                     "disp_state": disp_state, "W": w, 
+                     "dfree": dfree                  
+                    }
+                )
+            except:
+                print("Simulation failed. Do something (??)")      
 
-    def objective_function(self, candidate):
+        return time_costs, mechanical_matrices
+
+
+    def get_simulated_mechanical_matrices(self, sample_vars):
+        """
+        Perform a simulation evaluation.
+        -------
+        Inputs:
+        -------
+            sample_vars: lists of floats
+               List of float values describing the sample. 
+        --------
+        Outputs:
+        --------
+            w_0, dfree_0, disp_state, w, dfree: numpy arrays
+                The mechanical matrices obtained from simulation
+                
+        """
+        if self.__config.is_direct_control_sampling:
+            w_0, dfree_0, disp_state, w, dfree = self.direct_simulation(sample_vars)
+        else:
+            w_0, dfree_0, disp_state, w, dfree = self.inverse_simulation(sample_vars)
+        return w_0, dfree_0, disp_state, w, dfree
+
+
+    def direct_simulation(self, sample_vars):
+        # Separate constraint values from design variables
+        n_act = len(self.__config.get_actuators_variables())
+        n_sample_constraint_size = len(sample_vars) - len(self.__config.get_design_variables())
+        sample_actuation = sample_vars[:n_act]
+        sample_contact = sample_vars[n_act:n_sample_constraint_size]
+        sample_design = sample_vars[n_sample_constraint_size:]
+
+        # Compute real values for constraints
+        interpolated_actuation = self.__config.interpolate_variables(sample_actuation, var_type = "actuation")
+        interpolated_contact = self.__config.interpolate_variables(sample_contact, var_type = "contact")
+        interpolated_constraints = interpolated_actuation + interpolated_contact
+
+        # Update config with real values for contacts
+        copy_config = self.__config
+        interpolated_design = []
+        if len(sample_design) != 0:
+            interpolated_design = self.__config.interpolate_variables(sample_design, var_type = "design")
+            copy_config.set_design_variables(interpolated_design)
+
+        print("Start Simulation ... >>")
+
         # Init SOFA scene
-        scene_lib = importlib.import_module("Models." + self.__config.model_name + "." + self.__config.model_name)
         root = Sofa.Core.Node("root")
-        scene_lib.createScene(root, self.__config)
+        self.__scene_lib.createScene(root, copy_config)
         Sofa.Simulation.init(root)
 
-        # Simulate
-        try:
-            # Animate without actuation to reach equilibrium
-            null_action = len(self.__config.get_actuators_variables()) * [0]
-            root.Controller.apply_actions(null_action)
-            for step in range(self.__config.get_n_eq_dt()):
-                Sofa.Simulation.animate(root, root.dt.value)
-                time.sleep(root.dt.value)
-            W_0 = root.Controller.get_compliance_matrice_in_constraint_space()
-            dfree_0 = root.Controller.get_dfree()
+        # Animate without actuation to reach equilibrium
+        null_action = (len(self.__config.get_actuators_variables()) + len(self.__config.get_contacts_variables())) * [0]
+        root.Controller.apply_actions(null_action)
+        for step in range(self.__config.get_n_eq_dt()):
+            Sofa.Simulation.animate(root, root.dt.value)
+            time.sleep(root.dt.value)
+        w_0 = copy.deepcopy(root.Controller.get_compliance_matrice_in_constraint_space())
+        dfree_0 = copy.deepcopy(root.Controller.get_dfree())
 
-            # Apply action
-            interpolated_action = self.__config.interpolate_variables(candidate, var_type = "actuation")
-            for step in range(self.__config.get_n_dt()):
-                interpolated_action_step = [min((step + 1) * v/(self.__config.get_n_dt() - 10), v) for v in interpolated_action] # Apply gradually action
-                root.Controller.apply_actions(interpolated_action_step)
-                Sofa.Simulation.animate(root, root.dt.value)
-                time.sleep(root.dt.value)
-                
+        # Apply actuation / contact displacement
+        for step in range(self.__config.get_n_dt() + self.__config.get_post_sim_n_eq_dt()):
+            interpolated_constraints_step = [min((step + 1) * v/(self.__config.get_n_dt()), v) for v in interpolated_constraints] # Apply gradually action
+            root.Controller.apply_actions(interpolated_constraints_step)
+            Sofa.Simulation.animate(root, root.dt.value)
+            time.sleep(root.dt.value)
 
-            actuation_state = root.Controller.get_actuators_state()
-            effectors_state = root.Controller.get_effectors_state() # By default it is null
-            W = root.Controller.get_compliance_matrice_in_constraint_space()
-            dfree = root.Controller.get_dfree()
-            print(">> Simulation done")
+        actuation_state = root.Controller.get_actuators_state() # Contact points are handled as actuators in the SOFA scene
+        effectors_state = root.Controller.get_effectors_state() # By default it is null
+        w = copy.deepcopy(root.Controller.get_compliance_matrice_in_constraint_space())
+        dfree = copy.deepcopy(root.Controller.get_dfree())
+        print(">> ... Simulation done")
 
-            # Reset simulation
-            Sofa.Simulation.reset(root) 
+        # Reset simulation
+        Sofa.Simulation.reset(root)
 
-        except:
-            print("[ERROR] >> The scene did crash. We may penalize this set of parameters.")
-            return 100000
+        return w_0, dfree_0, actuation_state + effectors_state, w, dfree   
 
-        return 3 
+
+    def inverse_simulation(self, sample_vars):
+        # TODO: A function for managing special sampling space
+        pass
+        
+    
+    def compute_loss(self, pred_y, sim_y, mode = "MSE"):
+        if mode == "MSE":
+            diff = pred_y - sim_y
+            squared_diff = diff ** 2
+            mean_diff = squared_diff.mean()            
+            return mean_diff
+
+
+    def get_sampling_bounds(self):
+        """
+        Return the absolute bounds for the sampeld variables.
+        --------
+        Outputs:
+        --------
+            bounds: list of 2D lists
+                A list of min and max bounds for each sampling variable        
+        """    
+        bounds = []
+
+        if self.__config.is_direct_control_sampling:
+            # Actuator displacements
+            actuator_ranges = list(self.__config.get_actuators_variables().values())
+            for i in range(len(actuator_ranges)):
+                bounds.append([actuator_ranges[i][1], actuator_ranges[i][2]])
+
+            # Contact displacements
+            contact_ranges = list(self.__config.get_contacts_variables().values())
+            for i in range(len(contact_ranges)):
+                bounds.append([contact_ranges[i][1], contact_ranges[i][2]])
+
+            # Design variables
+            design_ranges = list(self.__config.get_design_variables().values())
+            for i in range(len(design_ranges)):
+                bounds.append([design_ranges[i][1], design_ranges[i][2]])
+        else:
+            pass
+        
+        return bounds
 
     #-------------get_bounds-------------#
     def get_bounds(self):
